@@ -6,20 +6,34 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+from scipy.cluster.hierarchy import linkage, dendrogram
 from IPython.display import display
-
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from sklearn.decomposition import PCA
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.metrics import calinski_harabasz_score
+
+from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
+
+from sklearn.cluster import (
+    KMeans,
+    DBSCAN,
+    AgglomerativeClustering
+)
+
+from sklearn.metrics import (
+    silhouette_score,
+    davies_bouldin_score,
+    calinski_harabasz_score
+)
 
 
-# ============================================================
-# 1. SETTINGS
-# ============================================================
 
 RANDOM_STATE = 42
 np.random.seed(RANDOM_STATE)
@@ -34,9 +48,7 @@ sns.set_theme(style="whitegrid")
 pd.set_option("display.max_columns", 100)
 
 
-# ============================================================
-# 2. LOAD DATASET
-# ============================================================
+
 
 df = pd.read_csv(DATA_PATH)
 
@@ -97,9 +109,6 @@ X_raw = df[FEATURES].copy()
 display(X_raw.describe().T)
 
 
-# ============================================================
-# 5. PREPROCESSING
-# ============================================================
 
 preprocess = Pipeline([
     ("imputer", SimpleImputer(strategy="median")),
@@ -124,9 +133,6 @@ print("\nStandard deviations after standardisation:")
 display(X_scaled.std(ddof=0).round(3).to_frame("std"))
 
 
-# ============================================================
-# 6. FAST SILHOUETTE FUNCTION
-# ============================================================
 
 def fast_silhouette_score(X, labels, sample_size=SILHOUETTE_SAMPLE_SIZE):
     """
@@ -149,9 +155,7 @@ def fast_silhouette_score(X, labels, sample_size=SILHOUETTE_SAMPLE_SIZE):
     )
 
 
-# ============================================================
-# 7. PCA VISUALIZATION
-# ============================================================
+
 
 pca_vis = PCA(n_components=2, random_state=RANDOM_STATE)
 X_pca2 = pca_vis.fit_transform(X_scaled)
@@ -175,9 +179,6 @@ print(
 )
 
 
-# ============================================================
-# 8. K-MEANS PARAMETER COMPARISON
-# ============================================================
 
 K_VALUES = list(range(2, 9))
 results_kmeans = []
@@ -224,9 +225,7 @@ print("\nK-Means results:")
 display(kmeans_results.round(4))
 
 
-# ============================================================
-# 9. ELBOW GRAPH
-# ============================================================
+
 
 fig, ax = plt.subplots(figsize=(9, 5))
 
@@ -252,9 +251,6 @@ ax.legend()
 plt.show()
 
 
-# ============================================================
-# 10. SILHOUETTE GRAPH
-# ============================================================
 
 fig, ax = plt.subplots(figsize=(9, 5))
 
@@ -280,9 +276,7 @@ ax.legend()
 plt.show()
 
 
-# ============================================================
-# 11. FINAL K-MEANS MODEL
-# ============================================================
+
 
 best_k_silhouette = int(
     kmeans_results.loc[
@@ -317,9 +311,6 @@ km_plus_final = KMeans(
 labels_plus_final = km_plus_final.fit_predict(X_scaled)
 
 
-# ============================================================
-# 12. K-MEANS MODEL COMPARISON
-# ============================================================
 
 comparison = pd.DataFrame({
     "Model": ["K-Means random", "K-Means++"],
@@ -392,9 +383,7 @@ print("\nCluster profile:")
 display(pd.concat([cluster_sizes, cluster_profile], axis=1))
 
 
-# ============================================================
-# 15. CLUSTER HEATMAP
-# ============================================================
+
 
 heatmap_data = (
     cluster_profile - cluster_profile.mean()
@@ -635,3 +624,308 @@ print(
 )
 
 print("\nExecution completed successfully.")
+
+
+
+HIER_SAMPLE_SIZE = min(2000, len(X_scaled))
+hier_idx = dbscan_rng.choice(len(X_scaled), size=HIER_SAMPLE_SIZE, replace=False)
+X_hier_sample = X_scaled.iloc[hier_idx].to_numpy()
+
+print("Hierarchical sample:", X_hier_sample.shape)
+
+# Compare the four common linkage strategies using the same sample.
+linkage_methods = ["single", "complete", "average", "ward"]
+
+fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+axes = axes.ravel()
+
+Z_by_linkage = {}
+
+for ax, method in zip(axes, linkage_methods):
+    Z = linkage(X_hier_sample, method=method)
+    Z_by_linkage[method] = Z
+
+    dendrogram(
+        Z,
+        truncate_mode="lastp",
+        p=30,
+        no_labels=True,
+        ax=ax
+    )
+    ax.set_title(f"Dendrogram — {method.title()} linkage")
+    ax.set_xlabel("Merged groups")
+    ax.set_ylabel("Distance")
+
+plt.tight_layout()
+plt.show()
+
+CUT_K_VALUES = [2, 3, 4, 5, 6]
+
+hierarchical_results = []
+
+for method in linkage_methods:
+    for k in CUT_K_VALUES:
+        model = AgglomerativeClustering(
+            n_clusters=k,
+            linkage=method
+        )
+        labels = model.fit_predict(X_hier_sample)
+
+        hierarchical_results.append({
+            "linkage": method,
+            "K": k,
+            "silhouette": silhouette_score(X_hier_sample, labels),
+            "davies_bouldin": davies_bouldin_score(X_hier_sample, labels),
+            "calinski_harabasz": calinski_harabasz_score(X_hier_sample, labels)
+        })
+
+hierarchical_results = pd.DataFrame(hierarchical_results)
+display(hierarchical_results.round(4))
+
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+for method in linkage_methods:
+    sub = hierarchical_results[hierarchical_results["linkage"] == method]
+    ax.plot(sub["K"], sub["silhouette"], marker="o", label=method.title())
+
+ax.set_xlabel("Number of clusters / cut level")
+ax.set_ylabel("Silhouette score")
+ax.set_title("Hierarchical Clustering — Silhouette vs Cut Level")
+ax.legend()
+plt.show()
+
+# Visualize one linkage (Ward) at multiple cut levels in PCA space.
+pca_hier = PCA(n_components=2, random_state=RANDOM_STATE)
+X_hier_pca = pca_hier.fit_transform(X_hier_sample)
+
+fig, axes = plt.subplots(2, 3, figsize=(17, 10))
+axes = axes.ravel()
+
+for ax, k in zip(axes, CUT_K_VALUES):
+    model = AgglomerativeClustering(n_clusters=k, linkage="ward")
+    labels = model.fit_predict(X_hier_sample)
+
+    ax.scatter(X_hier_pca[:, 0], X_hier_pca[:, 1],
+               c=labels, s=8, alpha=0.45, cmap="tab10")
+    ax.set_title(f"Ward linkage — K={k}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+
+# Hide unused axis
+if len(axes) > len(CUT_K_VALUES):
+    axes[-1].axis("off")
+
+plt.tight_layout()
+plt.show()
+
+# Visualize one linkage (Ward) at multiple cut levels in PCA space.
+pca_hier = PCA(n_components=2, random_state=RANDOM_STATE)
+X_hier_pca = pca_hier.fit_transform(X_hier_sample)
+
+fig, axes = plt.subplots(2, 3, figsize=(17, 10))
+axes = axes.ravel()
+
+for ax, k in zip(axes, CUT_K_VALUES):
+    model = AgglomerativeClustering(n_clusters=k, linkage="ward")
+    labels = model.fit_predict(X_hier_sample)
+
+    ax.scatter(X_hier_pca[:, 0], X_hier_pca[:, 1],
+               c=labels, s=8, alpha=0.45, cmap="tab10")
+    ax.set_title(f"Ward linkage — K={k}")
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
+
+# Hide unused axis
+if len(axes) > len(CUT_K_VALUES):
+    axes[-1].axis("off")
+
+plt.tight_layout()
+plt.show()
+
+fig, ax = plt.subplots(figsize=(9, 5))
+linkage_compare = pd.DataFrame(hierarchical_results)
+ax.set_xlabel("Linkage")
+ax.set_ylabel("Silhouette score")
+COMPARE_K = 3
+ax.set_title(f"Effect of Linkage at K={COMPARE_K}")
+plt.show()
+
+pca_full = PCA(random_state=RANDOM_STATE)
+X_pca_full = pca_full.fit_transform(X_scaled)
+
+explained = pca_full.explained_variance_ratio_
+cumulative = np.cumsum(explained)
+
+pca_summary = pd.DataFrame({
+    "PC": np.arange(1, len(explained) + 1),
+    "Explained_Variance_Ratio": explained,
+    "Cumulative_Explained_Variance": cumulative
+})
+
+display(pca_summary.head(15).round(4))
+
+plt.figure(figsize=(10, 5))
+plt.plot(
+    np.arange(1, len(explained) + 1),
+    cumulative * 100,
+    marker="o"
+)
+plt.axhline(90, linestyle="--", linewidth=1, label="90%")
+plt.axhline(95, linestyle="--", linewidth=1, label="95%")
+plt.xlabel("Number of Principal Components")
+plt.ylabel("Cumulative explained variance (%)")
+plt.title("PCA — Cumulative Explained Variance")
+plt.legend()
+plt.show()
+
+n_90 = np.argmax(cumulative >= 0.90) + 1
+n_95 = np.argmax(cumulative >= 0.95) + 1
+
+print("Components needed for at least 90%:", n_90)
+print("Components needed for at least 95%:", n_95)
+
+# PCA 2-D visualization
+plt.figure(figsize=(9, 6))
+plt.scatter(
+    X_pca_full[:, 0],
+    X_pca_full[:, 1],
+    s=8,
+    alpha=0.35
+)
+plt.xlabel(f"PC1 ({explained[0]*100:.1f}% variance)")
+plt.ylabel(f"PC2 ({explained[1]*100:.1f}% variance)")
+plt.title("PlacementPredict Students in PCA 2-D Space")
+plt.show()
+
+n_components_to_show = min(5, X_pca_full.shape[1])
+
+loadings = pd.DataFrame(
+    pca_full.components_[:n_components_to_show].T,
+    index=FEATURES,
+    columns=[f"PC{i}" for i in range(1, n_components_to_show + 1)]
+)
+
+display(loadings.round(3))
+
+plt.figure(figsize=(12, 8))
+sns.heatmap(loadings, center=0, cmap="coolwarm")
+plt.title("PCA Component Loadings")
+plt.xlabel("Principal Component")
+plt.ylabel("Original Feature")
+plt.show()
+
+# Median-imputed but UNSTANDARDIZED matrix
+imputer_only = SimpleImputer(strategy="median")
+X_imputed = imputer_only.fit_transform(X_raw)
+
+pca_raw = PCA(n_components=2, random_state=RANDOM_STATE)
+pca_raw.fit(X_imputed)
+
+pca_scaled = PCA(n_components=2, random_state=RANDOM_STATE)
+pca_scaled.fit(X_scaled)
+
+raw_loadings = pd.Series(pca_raw.components_[0], index=FEATURES, name="Raw_PC1")
+scaled_loadings = pd.Series(pca_scaled.components_[0], index=FEATURES, name="Scaled_PC1")
+
+pca_loading_compare = pd.concat([raw_loadings, scaled_loadings], axis=1)
+pca_loading_compare["abs_raw"] = pca_loading_compare["Raw_PC1"].abs()
+pca_loading_compare["abs_scaled"] = pca_loading_compare["Scaled_PC1"].abs()
+
+display(
+    pca_loading_compare.sort_values("abs_scaled", ascending=False)
+    .drop(columns=["abs_raw", "abs_scaled"])
+    .round(3)
+)
+
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+raw_sorted = raw_loadings.abs().sort_values(ascending=False).head(10)
+scaled_sorted = scaled_loadings.abs().sort_values(ascending=False).head(10)
+
+axes[0].barh(raw_sorted.index[::-1], raw_sorted.values[::-1])
+axes[0].set_title("Top |PC1 loadings| — Unscaled PCA")
+axes[0].set_xlabel("Absolute loading")
+
+axes[1].barh(scaled_sorted.index[::-1], scaled_sorted.values[::-1])
+axes[1].set_title("Top |PC1 loadings| — Standardized PCA")
+axes[1].set_xlabel("Absolute loading")
+
+plt.tight_layout()
+plt.show()
+
+
+# Compact comparison using the selected configurations.
+summary_rows = []
+
+# K-Means++
+summary_rows.append({
+    "Method": "K-Means++",
+    "Configuration": f"K={K_BEST}",
+    "Silhouette": silhouette_score(X_scaled, labels_plus_final),
+    "Davies_Bouldin": davies_bouldin_score(X_scaled, labels_plus_final),
+    "Clusters": len(np.unique(labels_plus_final))
+})
+
+# DBSCAN exploration result
+if len(valid_db):
+    summary_rows.append({
+        "Method": "DBSCAN (sample)",
+        "Configuration": f"eps={BEST_EPS}, min_samples={BEST_MIN_SAMPLES}",
+        "Silhouette": float(best_db_row["silhouette_non_noise"]),
+        "Davies_Bouldin": float(best_db_row["davies_bouldin_non_noise"]),
+        "Clusters": int(best_db_row["clusters"])
+    })
+
+# Best hierarchical configuration by silhouette
+best_hier = hierarchical_results.sort_values("silhouette", ascending=False).iloc[0]
+summary_rows.append({
+    "Method": f"Hierarchical ({best_hier['linkage']})",
+    "Configuration": f"K={int(best_hier['K'])}",
+    "Silhouette": float(best_hier["silhouette"]),
+    "Davies_Bouldin": float(best_hier["davies_bouldin"]),
+    "Clusters": int(best_hier["K"])
+})
+
+method_summary = pd.DataFrame(summary_rows)
+display(method_summary.round(4))
+
+plt.figure(figsize=(10, 5))
+sns.barplot(data=method_summary, x="Method", y="Silhouette")
+plt.xticks(rotation=20)
+plt.title("Clustering Method Comparison — Silhouette")
+plt.ylabel("Silhouette score")
+plt.show()
+
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.base import clone
+
+try:
+    from xgboost import XGBClassifier
+    MODEL_NAME = "XGBoost"
+    clf = XGBClassifier(
+        n_estimators=250,
+        max_depth=4,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        eval_metric="logloss",
+        random_state=RANDOM_STATE,
+        n_jobs=-1
+    )
+except ImportError:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    MODEL_NAME = "HistGradientBoostingClassifier (XGBoost unavailable)"
+    clf = HistGradientBoostingClassifier(
+        max_iter=250,
+        learning_rate=0.05,
+        max_leaf_nodes=31,
+        random_state=RANDOM_STATE
+    )
+
+print("Final supervised model:", MODEL_NAME)
+
+
+
+
